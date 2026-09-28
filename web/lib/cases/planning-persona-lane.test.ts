@@ -15,6 +15,7 @@ function fakeRepo(captured: { payload?: Record<string, unknown>; jobs?: PlannedJ
   return {
     // FR #0000096: the planner asks for unmodeled runbook sections to plan as manual steps.
     unmodeledSections: async () => [],
+    documentedSections: async () => [],
     clientForPlanning: async () => ({
       id: "c1", name: "Acme", slug: "acme", emailDomain: "acme.com", primaryDomain: "acme.com",
       identity: { usernamePatterns: ["{firstInitial}{last}@{domain}"] },

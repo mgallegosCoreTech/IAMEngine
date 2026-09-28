@@ -6,6 +6,7 @@ import type { PlannedJob } from "../orchestrator";
 import type { AuditEntry } from "../clients/types";
 import type { AuditActor } from "../auth/actor";
 import type { CaseDetail, CaseListItem, NewCaseInput, TrashedCaseItem } from "./types";
+import type { DocumentedSection } from "./documented-order";
 import { STARTED_STATUSES, hasStartedJobs, CaseAlreadyStartedError } from "./job-status";
 import { autoOffboardScheduleAt, offboardTargetResolved, engineOwnsSchedule, AUTO_SCHEDULE_ACTOR } from "./schedule";
 import { deriveCaseStatus } from "../jobs/runner-logic";
@@ -131,9 +132,19 @@ export function makeCaseRepository(db: PrismaClient) {
       const rows = await db.runbookSection.findMany({
         where: { clientId, action, status: "unmodeled" },
         orderBy: { seq: "asc" },
-        select: { title: true, steps: true, guess: true },
+        select: { title: true, steps: true, guess: true, seq: true },
       });
-      return rows.map((r) => ({ title: r.title, steps: r.steps ?? [], guess: r.guess ?? null }));
+      return rows.map((r) => ({ title: r.title, steps: r.steps ?? [], guess: r.guess ?? null, seq: r.seq }));
+    },
+
+    // Where each system sits in this action's runbook: the order a case's steps follow wherever
+    // their dependencies leave it open (FR #0000178).
+    async documentedSections(clientId: string, action: Action): Promise<DocumentedSection[]> {
+      return db.runbookSection.findMany({
+        where: { clientId, action, systemKey: { not: null } },
+        orderBy: { seq: "asc" },
+        select: { systemKey: true, seq: true },
+      });
     },
 
     async clientForPlanning(slug: string): Promise<

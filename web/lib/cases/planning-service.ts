@@ -11,7 +11,8 @@ import { resolvePlannedConfigs, personaSystemKeys } from "../profiles/plan-resol
 import { resolveUnknownsWithAI } from "./ai-resolve";
 import { autoOffboardScheduleAt, offboardTargetResolved } from "./schedule";
 import { resolveActor, type ActorInput } from "../auth/actor";
-import { unmodeledManualJobs } from "./unmodeled-steps";
+import { unmodeledManualSteps } from "./unmodeled-steps";
+import { documentedRank, inDocumentedOrder, mergeInDocumentedOrder } from "./documented-order";
 
 export type PlanOutcome = {
   caseId: string;
@@ -85,15 +86,17 @@ export async function createAndPlanCase(
   }
 
   // Plan, then (for v2.1 clients) flatten persona/globals/location config into each onboard job.
+  // Steps follow the runbook's documented order wherever their dependencies allow (FR #0000178).
+  const rank = documentedRank(await repo.documentedSections(client.id, input.action));
   const plannedSystems = resolvePlannedConfigs(client, payload, input.action,
-    planCase(client.systems, input.action, payload, personaSystemKeys(client, payload, input.action),
+    planCase(inDocumentedOrder(client.systems, rank), input.action, payload, personaSystemKeys(client, payload, input.action),
       new Set(client.notNeededSecrets), new Set(client.wiredOptionalSecrets), intakeRule?.skipSystems, client.backbone));
-  // Unmodeled runbook sections become manual checklist steps, planned LAST — they depend on nothing
-  // and nothing depends on them, so the automated sequence is untouched (FR #0000096).
-  const planned = [...plannedSystems, ...unmodeledManualJobs(
+  // Unmodeled runbook sections become manual checklist steps (FR #0000096), placed where the runbook
+  // lists them — they depend on nothing and nothing depends on them, so the automated order is untouched.
+  const planned = mergeInDocumentedOrder(plannedSystems, unmodeledManualSteps(
     await repo.unmodeledSections(client.id, input.action),
     plannedSystems.reduce((m, j) => Math.max(m, j.sequence), -1) + 1,
-  )];
+  ), rank);
   const status = deriveStatus(planned);
   const who = resolveActor(actor);
   const creator = { label: who.actor, userId: who.userId };

@@ -13,7 +13,8 @@ import { deriveStatus, type PlanOutcome } from "./planning-service";
 import { CaseAlreadyStartedError } from "./job-status";
 import { makeEmailDomainResolver } from "./plan-domain";
 import { resolvePlannedConfigs, personaSystemKeys } from "../profiles/plan-resolve";
-import { unmodeledManualJobs } from "./unmodeled-steps";
+import { unmodeledManualSteps } from "./unmodeled-steps";
+import { documentedRank, inDocumentedOrder, mergeInDocumentedOrder } from "./documented-order";
 import { resolveActor, type ActorInput } from "../auth/actor";
 
 export type ReplanResult =
@@ -80,6 +81,12 @@ export async function replanCase(db: PrismaClient, caseId: string, actor: ActorI
     }
   }
 
+  // Same documented order as the initial plan (FR #0000178), now that the action is settled.
+  // replanCaseJobs re-sequences kept jobs to the fresh plan, so re-planning an existing case also puts
+  // its steps back in runbook order.
+  const rank = documentedRank(await repo.documentedSections(info.client.id, action));
+  info.client.systems = inDocumentedOrder(info.client.systems, rank);
+
   // Re-derive the identity for onboarding from the client's CURRENT username pattern + the resolved
   // EMAIL domain (contact-derived, with any per-case override), falling back to the website domain.
   if (action === "onboard") {
@@ -98,10 +105,10 @@ export async function replanCase(db: PrismaClient, caseId: string, actor: ActorI
       new Set(info.client.notNeededSecrets), new Set(info.client.wiredOptionalSecrets), intakeRule?.skipSystems, info.client.backbone));
   // Same manual checklist steps the initial plan adds (FR #0000096). The synthetic key is stable,
   // so a step an operator already ticked off is KEPT by the incremental re-plan, not resurrected.
-  const planned = [...plannedSystems, ...unmodeledManualJobs(
+  const planned = mergeInDocumentedOrder(plannedSystems, unmodeledManualSteps(
     await repo.unmodeledSections(info.client.id, action),
     plannedSystems.reduce((m, j) => Math.max(m, j.sequence), -1) + 1,
-  )];
+  ), rank);
   const status = deriveStatus(planned);
   let result: { mode: "full" | "incremental"; kept: number; added: number; rerun: number };
   try {

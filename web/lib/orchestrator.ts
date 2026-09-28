@@ -111,8 +111,10 @@ function included(cs: ClientSystem, action: Action, payload: Record<string, unkn
   return Boolean(payload[cs.systemKey]);
 }
 
-// Topological sort honoring dependsOn (declared order as tiebreak). Lane-specific deps,
-// if present in config.dependsOn[action], override the system-level dependsOn.
+// Topological sort honoring dependsOn, with the order the systems are passed in as the tiebreak —
+// the planning services pass them in the client's documented runbook order (inDocumentedOrder,
+// FR #0000178). Lane-specific deps, if present in config.dependsOn[action], override the system-level
+// dependsOn.
 export function planCase(
   systems: ClientSystem[],
   action: Action,
@@ -226,13 +228,17 @@ export function planCase(
     return [...new Set([...declared, ...everyoneElse])];
   };
 
+  // A step's dependencies are pulled in that same order too, not the order its dependsOn lists them.
+  const position = new Map(active.map((s, i) => [s.systemKey, i]));
+  const inPassedOrder = (keys: string[]) => [...keys].sort((a, b) => position.get(a)! - position.get(b)!);
+
   const order: ClientSystem[] = [];
   const state = new Map<string, "open" | "done">();
   const visit = (s: ClientSystem) => {
     if (state.get(s.systemKey) === "done") return;
     if (state.get(s.systemKey) === "open") throw new Error(`dependency cycle at ${s.systemKey}`);
     state.set(s.systemKey, "open");
-    for (const d of depsOf(s)) visit(byKey.get(d)!);
+    for (const d of inPassedOrder(depsOf(s))) visit(byKey.get(d)!);
     state.set(s.systemKey, "done");
     order.push(s);
   };

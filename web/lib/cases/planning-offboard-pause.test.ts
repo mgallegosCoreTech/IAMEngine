@@ -9,6 +9,7 @@ function fakeRepo(holds: Array<[string, string | null]>): CaseRepository {
   return {
     // FR #0000096: the planner asks for unmodeled runbook sections to plan as manual steps.
     unmodeledSections: async () => [],
+    documentedSections: async () => [],
     clientForPlanning: async () => ({
       id: "c1", name: "Acme", slug: "acme", identity: {}, emailDomain: "acme.com",
       primaryDomain: "acme.com", systems: [],

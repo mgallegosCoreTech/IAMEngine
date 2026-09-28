@@ -11,7 +11,8 @@ import type { PlannedJob } from "../orchestrator";
 // rendering of manual notes — so this is the only missing hop.
 export const UNMODELED_PREFIX = "unmodeled:";
 
-export type UnmodeledSection = { title: string; steps: string[]; guess: string | null };
+// seq = the section's position in the runbook, so the step can be placed where it's documented.
+export type UnmodeledSection = { title: string; steps: string[]; guess: string | null; seq?: number };
 
 // Job.systemKey is a plain String, not a foreign key, so a synthetic key is safe here. It must be
 // STABLE across re-plans: replanCaseJobs keys kept jobs by systemKey, so a key that drifted would
@@ -34,14 +35,19 @@ export function unmodeledStepTitle(request: unknown): string | null {
 }
 
 export function unmodeledManualJobs(sections: UnmodeledSection[], startSequence: number): PlannedJob[] {
+  return unmodeledManualSteps(sections, startSequence).map((u) => u.job);
+}
+
+// The same jobs, each with its section's runbook position (for mergeInDocumentedOrder).
+export function unmodeledManualSteps(sections: UnmodeledSection[], startSequence: number): { job: PlannedJob; seq: number | undefined }[] {
   const taken = new Set<string>();
-  const out: PlannedJob[] = [];
+  const out: { job: PlannedJob; seq: number | undefined }[] = [];
   for (const s of sections) {
     const title = (s.title ?? "").trim();
     const systemKey = unmodeledStepKey(title, taken);
     if (!systemKey) continue; // nothing usable to key on — a heading of punctuation, not a step
     const steps = (s.steps ?? []).map((x) => String(x).trim()).filter(Boolean);
-    out.push({
+    out.push({ seq: s.seq, job: {
       systemKey,
       sequence: startSequence + out.length,
       mode: "manual",
@@ -53,7 +59,7 @@ export function unmodeledManualJobs(sections: UnmodeledSection[], startSequence:
       // `notes` is what the Run Report renders for a manual step (manualNotesOf). With no steps the
       // title is the whole instruction, so it becomes the note itself rather than an empty line.
       config: { title, guess: s.guess ?? null, notes: steps.length ? steps : [title], unmodeled: true },
-    });
+    } });
   }
   return out;
 }
