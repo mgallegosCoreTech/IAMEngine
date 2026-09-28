@@ -361,7 +361,8 @@ Describe 'the PnP grants never run in the runner process' {
     }
 
     It 'always removes the temp directory holding the certificate' {
-        $script:SpSrc | Should -Match 'finally \{ Remove-Item -LiteralPath \$dir -Recurse -Force'
+        # .NET, not Remove-Item, which a dry run's WhatIf would skip, leaving the certificate behind.
+        $script:SpSrc | Should -Match 'finally \{ try \{ \[System\.IO\.Directory\]::Delete\(\$dir, \$true\) \}'
     }
 
     It 'lists PnP.PowerShell in the assembly-sharing guard' {
@@ -458,5 +459,51 @@ Describe 'ConvertFrom-CtgPnPGrantOutput' {
     It 'tolerates an ERR line with no reason rather than emitting a bare colon' {
         $r = ConvertFrom-CtgPnPGrantOutput -Lines @("ERR`tsome grant")
         @($r)[0] | Should -Match 'WARN could not grant some grant: no reason given'
+    }
+}
+
+# A dry run sets $WhatIfPreference. The grant helper's file work used the cmdlets, which honour it, so
+# the child never got its request and every dry-run offboard naming a delegate came back with a WARN.
+# And the child is its own process: the dry run has to be handed to it, or a fixed helper would make a
+# REAL site-collection-admin grant during a dry run. These start real children, with a stand-in module
+# for the grant (PnP isn't on a test host).
+Describe 'Invoke-CtgPnPGrantOutOfProcess under a dry run' {
+    BeforeAll {
+        $script:DryDir = Join-Path ([System.IO.Path]::GetTempPath()) ("ctg-pnp-drytest-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $script:DryDir | Out-Null
+        $script:FakeGrant = Join-Path $script:DryDir 'fake.psm1'
+        Set-Content -LiteralPath $script:FakeGrant -Encoding utf8 -Value @'
+function Grant-CtgSharePointSiteAccess {
+    [CmdletBinding(SupportsShouldProcess)]
+    param($SiteUrl, $Delegate, $AppId, $Tenant, $CertificateBase64, $CertificatePassword, $CertificateThumbprint)
+    if ($CertificateBase64 -ne 'U0VDUkVU') { throw 'certificate did not arrive' }
+    if ($PSCmdlet.ShouldProcess($SiteUrl, "Add $Delegate as site-collection admin")) { return "granted $Delegate site-collection admin on $SiteUrl" }
+    "would grant $Delegate site-collection admin on $SiteUrl (WhatIf)"
+}
+'@
+        $script:Grants = @(@{ SiteUrl = 'https://contoso-my.sharepoint.com/personal/leaver'; Delegate = 'boss@contoso.com'; Label = "boss@contoso.com SharePoint access to the leaver's OneDrive site" })
+        $script:Leftovers = { @(Get-ChildItem ([System.IO.Path]::GetTempPath()) -Filter 'ctg-pnp-*' -Directory | Where-Object Name -NotLike 'ctg-pnp-drytest-*').Count }
+    }
+    AfterAll { Remove-Item -LiteralPath $script:DryDir -Recurse -Force -ErrorAction SilentlyContinue }
+
+    # The way the runner sets a dry run: the GLOBAL preference (Invoke-JobWithValidation).
+    It 'a dry run reaches the child and PREVIEWS the grant, instead of warning (and never makes it)' {
+        $global:WhatIfPreference = $true
+        try { $r = Invoke-CtgPnPGrantOutOfProcess -Grants $script:Grants -AppId app -Tenant contoso.onmicrosoft.com -CertArgs @{ CertificateBase64 = 'U0VDUkVU' } -ModulePath $script:FakeGrant }
+        finally { $global:WhatIfPreference = $false }
+        $r | Should -Be @('would grant boss@contoso.com site-collection admin on https://contoso-my.sharepoint.com/personal/leaver (WhatIf)')
+    }
+
+    It 'a live run still grants' {
+        Invoke-CtgPnPGrantOutOfProcess -Grants $script:Grants -AppId app -Tenant contoso.onmicrosoft.com -CertArgs @{ CertificateBase64 = 'U0VDUkVU' } -ModulePath $script:FakeGrant |
+            Should -Be @('granted boss@contoso.com site-collection admin on https://contoso-my.sharepoint.com/personal/leaver')
+    }
+
+    It 'a dry run leaves no request (certificate) directory behind' {
+        $before = & $script:Leftovers
+        $global:WhatIfPreference = $true
+        try { $null = Invoke-CtgPnPGrantOutOfProcess -Grants $script:Grants -AppId app -Tenant contoso.onmicrosoft.com -CertArgs @{ CertificateBase64 = 'U0VDUkVU' } -ModulePath $script:FakeGrant }
+        finally { $global:WhatIfPreference = $false }
+        & $script:Leftovers | Should -Be $before
     }
 }

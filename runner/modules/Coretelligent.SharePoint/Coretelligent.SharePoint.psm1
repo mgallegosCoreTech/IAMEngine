@@ -296,21 +296,31 @@ function Invoke-CtgPnPGrantOutOfProcess {
         [Parameter(Mandatory)][string]$AppId,
         [Parameter(Mandatory)][string]$Tenant,
         [hashtable]$CertArgs = @{},
-        [int]$TimeoutSeconds = 600
+        [int]$TimeoutSeconds = 600,
+        # The module the child imports. Tests point it at a stand-in so a real child can run without PnP.
+        [string]$ModulePath = (Join-Path $PSScriptRoot 'Coretelligent.SharePoint.psd1')
     )
     if (-not $Grants -or @($Grants).Count -eq 0) { return @() }
     $pwshPath = (Get-Process -Id $PID).Path
     if (-not $pwshPath) { $pwshPath = (Get-Command pwsh -ErrorAction SilentlyContinue).Source }
     if (-not $pwshPath) { throw 'cannot locate pwsh to run the SharePoint grants in a clean process' }
 
+    # A DRY RUN sets $global:WhatIfPreference (Invoke-JobWithValidation), and two things follow:
+    #   - New-Item / Set-Content / Remove-Item honour it. They skipped the writes, so the child found no
+    #     request, and the hand-off came back "exited without reporting any grant", a WARN on every
+    #     dry-run offboard that named a delegate. So the file work here is .NET calls, which ignore it.
+    #   - The child is a separate process, so the preference does not reach it on its own. It is passed
+    #     in the request, and the child grants with -WhatIf, so a dry run PREVIEWS the grant ("would
+    #     grant … (WhatIf)") instead of performing it. Without that, fixing the writes alone would have
+    #     turned every dry run into a real site-collection-admin grant.
+    $dryRun = [bool]$WhatIfPreference
     $dir = Join-Path ([System.IO.Path]::GetTempPath()) ("ctg-pnp-" + [guid]::NewGuid().ToString('N'))
-    $null = New-Item -ItemType Directory -Path $dir -Force
+    $null = [System.IO.Directory]::CreateDirectory($dir)
     if (-not $IsWindows) { & chmod 700 $dir 2>$null }
     $payloadPath = Join-Path $dir 'grants.json'
-    $modulePath = Join-Path $PSScriptRoot 'Coretelligent.SharePoint.psd1'
     try {
-        @{ Grants = @($Grants); AppId = $AppId; Tenant = $Tenant; CertArgs = $CertArgs; ModulePath = $modulePath } |
-            ConvertTo-Json -Depth 6 -Compress | Set-Content -LiteralPath $payloadPath -Encoding utf8
+        [System.IO.File]::WriteAllText($payloadPath, (@{ Grants = @($Grants); AppId = $AppId; Tenant = $Tenant; CertArgs = $CertArgs; ModulePath = $ModulePath; WhatIf = $dryRun } |
+            ConvertTo-Json -Depth 6 -Compress))
         if (-not $IsWindows) { & chmod 600 $payloadPath 2>$null }
 
         # The child reads the payload, DELETES it, then grants. Each line it prints is one action line;
@@ -324,17 +334,18 @@ Import-Module $p.ModulePath -Force
 $certArgs = @{}
 if ($p.CertArgs) { foreach ($k in $p.CertArgs.PSObject.Properties.Name) { $certArgs[$k] = $p.CertArgs.$k } }
 foreach ($g in @($p.Grants)) {
-    try { "OK`t" + (Grant-CtgSharePointSiteAccess -SiteUrl $g.SiteUrl -Delegate $g.Delegate -AppId $p.AppId -Tenant $p.Tenant @certArgs) }
+    try { "OK`t" + (Grant-CtgSharePointSiteAccess -SiteUrl $g.SiteUrl -Delegate $g.Delegate -AppId $p.AppId -Tenant $p.Tenant @certArgs -WhatIf:([bool]$p.WhatIf)) }
     catch { "ERR`t" + $g.Label + "`t" + $_.Exception.Message }
 }
 '@
         $childPath = Join-Path $dir 'grant.ps1'
-        Set-Content -LiteralPath $childPath -Value $child -Encoding utf8
+        [System.IO.File]::WriteAllText($childPath, $child)
         $out = & $pwshPath -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $childPath -PayloadPath $payloadPath 2>&1
         $code = $LASTEXITCODE
         return ConvertFrom-CtgPnPGrantOutput -Lines @($out | ForEach-Object { [string]$_ }) -ExitCode $code
     }
-    finally { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
+    # .NET, not Remove-Item: under a dry run's WhatIf, Remove-Item would leave the certificate behind.
+    finally { try { [System.IO.Directory]::Delete($dir, $true) } catch { } }
 }
 
 # A OneDrive drive's webUrl points at the document library (…/personal/<user>/Documents[/…]), not the
