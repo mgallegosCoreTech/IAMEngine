@@ -493,6 +493,47 @@ Describe 'Invoke-CtgExchangeOffboarding' {
         Should -Invoke Resolve-CtgAddressByDisplayName -ModuleName Coretelligent.Exchange -Times 0 -Exactly
     }
 
+    # FR #0000211: the client (config.offboard.delegateAutoMapping) or the case can grant a delegate
+    # Full Access WITHOUT adding the mailbox to their Outlook. Unset stays on (the tests above).
+    It 'grants both delegates with AutoMapping OFF when delegateAutoMapping is false' {
+        Mock Get-MailboxStatistics -ModuleName Coretelligent.Exchange -MockWith { [pscustomobject]@{ TotalItemSize = '1 GB (1,073,741,824 bytes)' } }
+        Mock Get-MailboxPermission -ModuleName Coretelligent.Exchange -MockWith { @() }
+        Mock Add-MailboxPermission -ModuleName Coretelligent.Exchange -MockWith { }
+        $u = [pscustomobject]@{ UserPrincipalName = 'jdoe@61commodities.com'; ManagerEmail = 'boss@61commodities.com' }
+        $r = Invoke-CtgExchangeOffboarding -User $u -Config ([pscustomobject]@{ delegateManagerFullAccess = $true; grantFullAccessTo = 'dgani@61commodities.com'; delegateAutoMapping = $false })
+        Should -Invoke Add-MailboxPermission -ModuleName Coretelligent.Exchange -Times 1 -Exactly -ParameterFilter { $User -eq 'boss@61commodities.com' -and -not $AutoMapping }
+        Should -Invoke Add-MailboxPermission -ModuleName Coretelligent.Exchange -Times 1 -Exactly -ParameterFilter { $User -eq 'dgani@61commodities.com' -and -not $AutoMapping }
+        Should -Invoke Add-MailboxPermission -ModuleName Coretelligent.Exchange -Times 0 -Exactly -ParameterFilter { $AutoMapping }
+        ($r.Actions -join ' ') | Should -Match 'granted manager boss@61commodities.com Full Access to the mailbox \(AutoMapping off'
+        ($r.Actions -join ' ') | Should -Match 'granted case-requested delegate dgani@61commodities.com Full Access to the mailbox \(AutoMapping off'
+    }
+
+    It 'delegateAutoMapping true keeps AutoMapping on' {
+        Mock Get-MailboxStatistics -ModuleName Coretelligent.Exchange -MockWith { [pscustomobject]@{ TotalItemSize = '1 GB (1,073,741,824 bytes)' } }
+        Mock Get-MailboxPermission -ModuleName Coretelligent.Exchange -MockWith { @() }
+        Mock Add-MailboxPermission -ModuleName Coretelligent.Exchange -MockWith { }
+        $r = Invoke-CtgExchangeOffboarding -User $user -Config ([pscustomobject]@{ grantFullAccessTo = 'dgani@61commodities.com'; delegateAutoMapping = $true })
+        Should -Invoke Add-MailboxPermission -ModuleName Coretelligent.Exchange -Times 1 -Exactly -ParameterFilter { $User -eq 'dgani@61commodities.com' -and $AutoMapping }
+        ($r.Actions -join ' ') | Should -Match '\(AutoMapping on\)'
+    }
+
+    It 'a hand-edited "false" string still turns AutoMapping off' {
+        Mock Get-MailboxStatistics -ModuleName Coretelligent.Exchange -MockWith { [pscustomobject]@{ TotalItemSize = '1 GB (1,073,741,824 bytes)' } }
+        Mock Get-MailboxPermission -ModuleName Coretelligent.Exchange -MockWith { @() }
+        Mock Add-MailboxPermission -ModuleName Coretelligent.Exchange -MockWith { }
+        $null = Invoke-CtgExchangeOffboarding -User $user -Config ([pscustomobject]@{ grantFullAccessTo = 'dgani@61commodities.com'; delegateAutoMapping = 'false' })
+        Should -Invoke Add-MailboxPermission -ModuleName Coretelligent.Exchange -Times 1 -Exactly -ParameterFilter { -not $AutoMapping }
+    }
+
+    It 'says an existing grant keeps its AutoMapping when the case asks for it off' {
+        Mock Get-MailboxStatistics -ModuleName Coretelligent.Exchange -MockWith { [pscustomobject]@{ TotalItemSize = '1 GB (1,073,741,824 bytes)' } }
+        Mock Get-MailboxPermission -ModuleName Coretelligent.Exchange -MockWith { @([pscustomobject]@{ User = 'dgani@61commodities.com'; AccessRights = @('FullAccess') }) }
+        Mock Add-MailboxPermission -ModuleName Coretelligent.Exchange -MockWith { }
+        $r = Invoke-CtgExchangeOffboarding -User $user -Config ([pscustomobject]@{ grantFullAccessTo = 'dgani@61commodities.com'; delegateAutoMapping = $false })
+        Should -Invoke Add-MailboxPermission -ModuleName Coretelligent.Exchange -Times 0 -Exactly
+        ($r.Actions -join ' ') | Should -Match 'already has Full Access — no change \(AutoMapping stays as it was'
+    }
+
     It 'is idempotent — no re-grant when the manager already has Full Access' {
         Mock Get-MailboxStatistics -ModuleName Coretelligent.Exchange -MockWith { [pscustomobject]@{ TotalItemSize = '1 GB (1,073,741,824 bytes)' } }
         Mock Get-MailboxPermission -ModuleName Coretelligent.Exchange -MockWith { @([pscustomobject]@{ User = 'boss@61commodities.com'; AccessRights = @('FullAccess') }) }

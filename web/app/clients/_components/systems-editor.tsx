@@ -24,6 +24,9 @@ type Row = {
   onboardOu: string; // AD onboarding target DN (config.onboard.ou) — the field the runner actually uses
   galMode: GalMode; // hide-from-GAL deviation (config.offboard.hideFromGal) — default is hide, this only records opt-outs
   galAttribute: string; // AD-only: the attribute name when galMode === "attribute"
+  // Exchange-only: offboard delegates' Full Access adds the mailbox to their Outlook (AutoMapping).
+  // config.offboard.delegateAutoMapping — only `false` is stored; unset is on (FR #0000211).
+  delegateAutoMap: boolean;
   secretNames: string[];
   configText: string; // JSON text; parsed on save
 };
@@ -58,6 +61,7 @@ const HELP = {
   config: 'Per-lane JSON settings, nested under onboard / offboard. e.g. { "offboard": { "delete": true } }. Leave blank for defaults.',
   onboardOu: "Where new AD accounts are created (config.onboard.ou). This is the value the runner uses — it overrides any OU set in Roles & rules. Type a full DN or 📁 Browse the folders discovered from the DC. Leave blank to create at the domain default. Refresh the folder list under Roles & rules → “Refresh AD objects from DC”.",
   hideFromGal: "Hiding offboarded users from the Global Address List is the default (FR #21). Use this only to record a deviation: “Do NOT hide” opts this client out entirely; “Hide via AD attribute…” (AD only) hides by setting a named attribute (e.g. msExchHideFromAddressLists) to TRUE instead of the default mechanism.",
+  delegateAutoMap: "Offboarding: when a delegate (the manager, or someone named on the ticket) is given Full Access to the leaver's mailbox, whether the mailbox is also added to their Outlook automatically. This is the client's default; a case can change it before the Exchange step runs.",
 };
 
 function Field({ label, help, children, grow }: { label: string; help: string; children: ReactNode; grow?: boolean }) {
@@ -101,6 +105,7 @@ function rowFromCatalog(key: string): Row {
     onboardOu: "",
     galMode: "default",
     galAttribute: "",
+    delegateAutoMap: true,
     secretNames: c?.secret ? [c.secret] : [],
     configText: "",
   };
@@ -177,6 +182,7 @@ export function SystemsEditor({ slug, open, onClose }: { slug: string | null; op
           offboardIntent: ((sys.config as { intent?: { offboard?: unknown } } | null)?.intent?.offboard) === "destructive" ? "destructive" : "disable",
           onboardOu: String((sys.config as { onboard?: { ou?: unknown } } | null)?.onboard?.ou ?? ""),
           ...galFromConfig(sys.config),
+          delegateAutoMap: (sys.config as { offboard?: { delegateAutoMapping?: unknown } } | null)?.offboard?.delegateAutoMapping !== false,
           secretNames: Array.isArray(sys.secretNames) ? sys.secretNames : [],
           configText: sys.config ? JSON.stringify(sys.config, null, 2) : "",
         }))
@@ -298,6 +304,19 @@ export function SystemsEditor({ slug, open, onClose }: { slug: string | null; op
       if (config === null) config = {};
       const intent = { ...((config.intent as Record<string, unknown> | undefined) ?? {}), offboard: r.offboardIntent };
       config = { ...config, intent };
+      // The delegate AutoMapping control is authoritative for config.offboard.delegateAutoMapping, the
+      // client default the planner flattens onto the exchange offboard job (a case can override it).
+      if (r.systemKey === "exchange") {
+        const offboard = { ...((config.offboard as Record<string, unknown> | undefined) ?? {}) };
+        if (r.delegateAutoMap) delete offboard.delegateAutoMapping;
+        else offboard.delegateAutoMapping = false;
+        if (Object.keys(offboard).length === 0) {
+          const { offboard: _drop, ...rest } = config;
+          config = rest;
+        } else {
+          config = { ...config, offboard };
+        }
+      }
       // The onboarding-OU control is authoritative for the AD create target: merge it into
       // config.onboard.ou (the field the runner reads), so it wins over the raw JSON textarea — the
       // same "structured control beats the blob" contract as offboardIntent above.
@@ -510,6 +529,14 @@ export function SystemsEditor({ slug, open, onClose }: { slug: string | null; op
                           style={{ marginTop: 4, fontFamily: "monospace", fontSize: 12 }}
                         />
                       )}
+                    </Field>
+                  )}
+                  {r.systemKey === "exchange" && (
+                    <Field label="Delegate AutoMapping" help={HELP.delegateAutoMap}>
+                      <select value={r.delegateAutoMap ? "on" : "off"} onChange={(e) => update(i, { delegateAutoMap: e.target.value === "on" })} disabled={r.offboardWhen === "never"}>
+                        <option value="on">On — add the mailbox to the delegate&rsquo;s Outlook</option>
+                        <option value="off">Off — access only, not added to Outlook</option>
+                      </select>
                     </Field>
                   )}
                   <Field label="Secrets" help={HELP.secrets}>

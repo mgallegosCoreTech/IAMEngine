@@ -615,6 +615,44 @@ function ReviewPanel({ caseId, review, refresh }: { caseId: string; review: NonN
   );
 }
 
+// Offboard mailbox delegates (FR #0000211): who gets Full Access to the leaver's mailbox, and whether
+// that also adds it to their Outlook (AutoMapping). The client sets the default; this case can differ
+// until the Exchange step starts, when the access is granted and the choice is fixed.
+function DelegationPanel({ caseId, d, refresh }: { caseId: string; d: NonNullable<RunReport["delegation"]>; refresh: () => Promise<void> | void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const who = [...(d.manager ? ["the leaver's manager"] : []), ...d.delegates].join(", ");
+  const onOff = (v: boolean) => (v ? "on" : "off");
+  const value = d.override === null ? "default" : d.override ? "on" : "off";
+  return (
+    <div className="note" style={{ margin: "0 0 0.6rem", padding: "0.55rem 0.75rem", borderRadius: 8, border: "1px solid var(--line)" }}>
+      <div><b>Mailbox delegates</b> (Full Access to the leaver&rsquo;s mailbox): {who}</div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4, flexWrap: "wrap" }}>
+        <label style={{ margin: 0 }} htmlFor={`automap-${caseId}`}>Add it to their Outlook automatically (AutoMapping):</label>
+        <select id={`automap-${caseId}`} value={value} disabled={busy || d.locked} style={{ fontSize: 12 }} onChange={async (e) => {
+          const v = e.target.value;
+          setBusy(true); setErr(null);
+          try {
+            const r = await fetch(`/api/cases/${caseId}/delegate-automapping`, {
+              method: "PATCH", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ autoMapping: v === "default" ? null : v === "on" }),
+            });
+            if (!r.ok) { setErr(((await r.json().catch(() => ({}))) as { error?: string }).error ?? `failed (${r.status})`); return; }
+            await refresh();
+          } catch (ex) { setErr((ex as Error).message); }
+          finally { setBusy(false); }
+        }}>
+          <option value="default">Client default{d.clientDefault === undefined ? "" : ` (${onOff(d.clientDefault)})`}</option>
+          <option value="on">On for this case</option>
+          <option value="off">Off for this case: access only</option>
+        </select>
+        {d.locked && <span className="muted">The Exchange step has started, so this was decided when it ran (AutoMapping {onOff(d.autoMapping)}).</span>}
+      </div>
+      {err && <div style={{ color: "#b91c1c", marginTop: 4 }}>{err}</div>}
+    </div>
+  );
+}
+
 // "Needs Information": the intake left fields it couldn't determine. When held, the case is paused
 // until they're filled in; saving releases it so it can run.
 function NeedsInfoPanel({ caseId, info, refresh }: { caseId: string; info: NonNullable<RunReport["needsInfo"]>; refresh: () => Promise<void> | void }) {
@@ -898,6 +936,7 @@ export function RunReportView({ initial, caseId, writeEnabled }: { initial: RunR
       )}
       {report.needsInfo && <NeedsInfoPanel caseId={caseId} info={report.needsInfo} refresh={refresh} />}
       {report.review && <ReviewPanel caseId={caseId} review={report.review} refresh={refresh} />}
+      {report.delegation && <DelegationPanel caseId={caseId} d={report.delegation} refresh={refresh} />}
       {report.aiResolved && (
         <div className="note" style={{ margin: "0 0 0.5rem", padding: "0.45rem 0.65rem", borderRadius: 8, border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1e40af" }}>
           ✨ AI-filled (please verify): {report.aiResolved.map((a) => `${a.field} — ${a.note}`).join(" · ")}

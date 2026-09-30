@@ -5,6 +5,7 @@
 //
 // Pure core (buildRunReport) takes already-loaded rows so it's unit-testable without a DB; the
 // DB loader (loadRunReport) gathers the inputs and a markdown renderer produces the export.
+import { delegationOf, clientAutoMappingDefault, type Delegation } from "./delegate-automapping";
 import type { PrismaClient } from "@prisma/client";
 import { missingRequiredSecrets, ALWAYS_ON_PREM_SYSTEMS, systemIsOnPrem } from "./case-secrets";
 import { parseCapabilities, agentCanRun, BROWSER_SYSTEMS } from "../runner/capabilities";
@@ -113,6 +114,9 @@ export type RunReport = {
     fallbacks: string[]; // conflict-fallback usernames (payload.userPrincipalNameFallbacks)
     extraGroups: string; // operator-typed additional groups (FR #30), comma-separated for the input
   } | null;
+  // Offboard mailbox delegates and whether their access adds the mailbox to their Outlook
+  // (FR #0000211). null when the case delegates nobody.
+  delegation?: Delegation | null;
   user: string | null;
   startedAt: string | null;
   finishedAt: string | null;
@@ -506,6 +510,7 @@ export function buildRunReport(input: BuildRunReportInput): RunReport {
     })(),
     // A sweep is in flight when a validate-only job is still pending/dispatched/running.
     verifying: input.jobs.some((j) => Boolean((j.request as { validateOnly?: boolean } | null)?.validateOnly) && ["pending", "dispatched", "running"].includes(j.status)),
+    delegation: delegationOf(input.action, input.jobs, input.payload),
     user: userHeader(input.action, input.payload),
     startedAt: times.length ? new Date(Math.min(...times.map((d) => d.getTime()))).toISOString() : null,
     finishedAt: ends.length ? new Date(Math.max(...ends.map((d) => d.getTime()))).toISOString() : null,
@@ -592,6 +597,16 @@ export async function loadRunReport(db: PrismaClient, caseId: string): Promise<R
     names,
     acceptedSystemKeys,
   });
+
+  // The client's own AutoMapping default, so the case page can say what "the client default" means. A
+  // child planning with its parent's systems has no exchange row of its own — read the parent's.
+  if (report.delegation) {
+    const own = await db.clientSystem.findFirst({ where: { clientId: c.client.id, systemKey: "exchange" }, select: { config: true } });
+    const sys = own ?? (c.client.parentId
+      ? await db.clientSystem.findFirst({ where: { clientId: c.client.parentId, systemKey: "exchange" }, select: { config: true } })
+      : null);
+    report.delegation.clientDefault = clientAutoMappingDefault(sys?.config ?? null);
+  }
 
   report.warningsDismissed = c.warningsDismissedAt
     ? {

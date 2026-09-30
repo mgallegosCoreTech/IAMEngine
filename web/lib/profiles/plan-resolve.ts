@@ -124,6 +124,16 @@ function resolveOffboardConfigs(client: PlanClient, payload: Record<string, unkn
     return j;
   });
 
+  // Delegate AutoMapping (FR #0000211): whether a delegate's Full Access also adds the leaver's mailbox
+  // to their Outlook. The client's default already rides on the exchange job (config.offboard is
+  // flattened onto it as delegateAutoMapping; unset = on). An operator's per-case choice
+  // (payload.delegateAutoMapping, set from the case page) overrides it, for BOTH delegate grants.
+  const autoMapOverride = typeof payload.delegateAutoMapping === "boolean" ? payload.delegateAutoMapping : null;
+  const withAutoMap = autoMapOverride === null ? withDelegate : withDelegate.map((j) =>
+    j.systemKey === "exchange"
+      ? { ...j, config: { ...((j.config as Record<string, unknown> | null) ?? {}), delegateAutoMapping: autoMapOverride } }
+      : j);
+
   // Case out-of-office (FR #0000047): the intake captures the leaver's auto-reply text
   // (u_out_of_office_message -> payload.oooMessage) and NOTHING read it — the mapper wrote the field
   // and there was no consumer anywhere in the codebase, so a requestor who filled it in got silence.
@@ -135,7 +145,7 @@ function resolveOffboardConfigs(client: PlanClient, payload: Record<string, unkn
   // profile-configured default (same rule as FR #87 — what the ticket says beats the standing default),
   // and an absent/blank message leaves the profile's own autoReply exactly as it was.
   const ooo = typeof payload.oooMessage === "string" && payload.oooMessage.trim() ? payload.oooMessage.trim() : null;
-  const withOoo = !ooo ? withDelegate : withDelegate.map((j) => {
+  const withOoo = !ooo ? withAutoMap : withAutoMap.map((j) => {
     if (j.systemKey !== "exchange") return j;
     const cfg = (j.config as Record<string, unknown> | null) ?? {};
     return { ...j, config: { ...cfg, autoReply: { ...((cfg.autoReply as Record<string, unknown> | null) ?? {}), message: ooo } } };

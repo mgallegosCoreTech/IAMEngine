@@ -1060,9 +1060,19 @@ function Invoke-CtgExchangeOffboarding {
         }
     }
 
+    # FR #0000211: whether a delegate's Full Access also ADDS the mailbox to their Outlook
+    # (AutoMapping). The client sets the default (config.offboard.delegateAutoMapping) and a case can
+    # override it; unset means on, which is what every grant did before. Applies to both delegate
+    # grants below. JSON gives a real bool, but a hand-edited "false" string must not read as $true.
+    $autoMapRaw = Get-CtgProp $Config 'delegateAutoMapping'
+    $autoMap = if ($null -eq $autoMapRaw) { $true } elseif ($autoMapRaw -is [bool]) { $autoMapRaw } else { "$autoMapRaw" -notmatch '^(false|0|no|off)$' }
+    $autoMapNote = if ($autoMap) { 'AutoMapping on' } else { 'AutoMapping off — not added to their Outlook' }
+    # AutoMapping is fixed when the permission is granted, so an existing grant keeps what it had.
+    $alreadyNote = if ($autoMap) { 'no change' } else { 'no change (AutoMapping stays as it was when that access was granted)' }
+
     # 1b. Grant the manager Full Access to the mailbox (so they can retrieve mail) -------
     # config.delegateManagerFullAccess: $true uses the case's manager; a string sets an explicit
-    # address. AutoMapping adds the mailbox to the manager's Outlook automatically. Idempotent.
+    # address. AutoMapping (see above) adds the mailbox to the manager's Outlook. Idempotent.
     $delegate = Get-CtgProp $Config 'delegateManagerFullAccess'
     if ($delegate -and -not $hasExoMailbox) {
         $actions.Add("Full Access delegate skipped — $upn is a MailUser (on-prem mailbox); grant Full Access on-prem if needed")
@@ -1108,12 +1118,12 @@ function Invoke-CtgExchangeOffboarding {
             $already = @(Get-MailboxPermission -Identity $upn -ErrorAction SilentlyContinue) |
                 Where-Object { (@($_.AccessRights) -contains 'FullAccess') -and ("$($_.User)" -eq $mgr -or "$($_.User)" -like "*$mgr*") }
             if ($already) {
-                $actions.Add("manager $mgr already has Full Access — no change")
+                $actions.Add("manager $mgr already has Full Access — $alreadyNote")
             }
             elseif ($PSCmdlet.ShouldProcess($upn, "Grant $mgr Full Access")) {
                 try {
-                    Add-MailboxPermission -Identity $upn -User $mgr -AccessRights FullAccess -AutoMapping:$true -ErrorAction Stop | Out-Null
-                    $actions.Add("granted manager $mgr Full Access to the mailbox (AutoMapping on)")
+                    Add-MailboxPermission -Identity $upn -User $mgr -AccessRights FullAccess -AutoMapping:$autoMap -ErrorAction Stop | Out-Null
+                    $actions.Add("granted manager $mgr Full Access to the mailbox ($autoMapNote)")
                 }
                 catch { $actions.Add("WARN could not grant $mgr Full Access: $($_.Exception.Message)") }
             }
@@ -1152,12 +1162,12 @@ function Invoke-CtgExchangeOffboarding {
                 $already = @(Get-MailboxPermission -Identity $upn -ErrorAction SilentlyContinue) |
                     Where-Object { (@($_.AccessRights) -contains 'FullAccess') -and ("$($_.User)" -eq $addr -or "$($_.User)" -like "*$addr*") }
                 if ($already) {
-                    $actions.Add("case-requested delegate $addr already has Full Access — no change")
+                    $actions.Add("case-requested delegate $addr already has Full Access — $alreadyNote")
                 }
                 elseif ($PSCmdlet.ShouldProcess($upn, "Grant $addr Full Access (case-requested)")) {
                     try {
-                        Add-MailboxPermission -Identity $upn -User $addr -AccessRights FullAccess -AutoMapping:$true -ErrorAction Stop | Out-Null
-                        $actions.Add("granted case-requested delegate $addr Full Access to the mailbox (AutoMapping on)")
+                        Add-MailboxPermission -Identity $upn -User $addr -AccessRights FullAccess -AutoMapping:$autoMap -ErrorAction Stop | Out-Null
+                        $actions.Add("granted case-requested delegate $addr Full Access to the mailbox ($autoMapNote)")
                     }
                     catch { $actions.Add("WARN could not grant $addr Full Access: $($_.Exception.Message)") }
                 }
@@ -1238,7 +1248,7 @@ function Invoke-CtgExchangeOffboarding {
                 $actions.Add("admin account check: found $adminUpn — running the mailbox disable path on it")
                 $adminCfg = @{}
                 foreach ($p in $Config.PSObject.Properties) {
-                    if ($p.Name -in @('adminAccountSuffix', 'convertToShared', 'mailbox', 'delegateManagerFullAccess', 'grantFullAccessTo', 'autoReply', 'forwarding')) { continue }
+                    if ($p.Name -in @('adminAccountSuffix', 'convertToShared', 'mailbox', 'delegateManagerFullAccess', 'grantFullAccessTo', 'delegateAutoMapping', 'autoReply', 'forwarding')) { continue }
                     $adminCfg[$p.Name] = $p.Value
                 }
                 $adminResult = Invoke-CtgExchangeOffboarding -User ([pscustomobject]@{ UserPrincipalName = $adminUpn }) -Config ([pscustomobject]$adminCfg)
