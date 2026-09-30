@@ -29,6 +29,7 @@ import { GenerateRunbookButton } from "../_components/generate-runbook-button";
 import { M365LicenseEditor } from "../_components/m365-license-editor";
 import { M365LicenseRulesEditor } from "../_components/m365-license-rules-editor";
 import { normalizeLicenseRules } from "@/lib/m365/license-rules";
+import { inheritedLicenseRules, inheritsParentModeling, licenseRulesOf } from "@/lib/cases/parent-inheritance";
 import { parseLicenseEntries } from "@/lib/m365/license-config";
 import { M365GroupsEditor } from "../_components/m365-groups-editor";
 import { MailboxAccessEditor } from "../_components/mailbox-access-editor";
@@ -206,6 +207,13 @@ export default async function ClientDetailPage({ params }: { params: { slug: str
 
   // index systems for dependency badges + per-system config (code preview)
   const sysByKey = new Map(client.systems.map((s) => [s.systemKey, s]));
+  // A child with its own m365 system that hasn't set license rules plans with its parent's (see
+  // applyParentInheritance), while it follows the parent's rules — show them rather than "none", and
+  // offer to go back to them once the child has its own.
+  const parentLicenseRules = parent && sysByKey.has("m365") && inheritsParentModeling(client)
+    ? inheritedLicenseRules({}, await db.clientSystem.findMany({ where: { clientId: client.parentId!, systemKey: "m365" }, select: { systemKey: true, config: true } }))
+    : null;
+  const ownLicenseRulesSet = licenseRulesOf(sysByKey.get("m365")) !== undefined;
   const keysInAction: Record<"onboard" | "offboard", Set<string>> = { onboard: new Set(), offboard: new Set() };
   for (const r of runbook) if (r.systemKey) keysInAction[r.action].add(r.systemKey);
 
@@ -386,6 +394,8 @@ export default async function ClientDetailPage({ params }: { params: { slug: str
       {sysByKey.has("m365") && (
         <M365LicenseRulesEditor
           slug={client.slug}
+          inherited={parentLicenseRules && !ownLicenseRulesSet ? { parentName: parent!.name, parentSlug: parent!.slug, rules: normalizeLicenseRules(parentLicenseRules) } : null}
+          canInherit={parentLicenseRules && ownLicenseRulesSet ? parent!.name : null}
           current={(() => {
             const cfg = (sysByKey.get("m365")?.config ?? {}) as { onboard?: { licenseRules?: unknown } };
             return normalizeLicenseRules(cfg.onboard?.licenseRules);

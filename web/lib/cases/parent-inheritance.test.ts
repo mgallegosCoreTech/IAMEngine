@@ -96,3 +96,63 @@ test("an EMPTY personas object is not treated as unset", () => {
   const out = applyParentInheritance(child, parent, BOTH);
   assert.deepEqual(out.personas, {});
 });
+
+// M365 license rules live on the m365 SYSTEM's config, so the modeling fallback above never reached
+// them: a child with its own m365 row planned with no license rules, even while following its parent.
+const m365With = (licenseRules?: unknown[]) => ({
+  systemKey: "m365",
+  config: { onboard: { licenses: ["Defender"], ...(licenseRules ? { licenseRules } : {}) }, offboard: { keep: true } },
+});
+const RULES = [{ when: "needsComputer == true", licenses: ["E5"] }, { when: "", licenses: ["E1"] }];
+const parentWithRules = { ...parent, systems: [m365With(RULES), { systemKey: "exchange" }] as unknown[] };
+const rulesOn = (c: { systems: unknown[] }) =>
+  ((c.systems.find((s) => (s as { systemKey: string }).systemKey === "m365") as { config: { onboard: { licenseRules?: unknown } } }).config.onboard.licenseRules);
+const OWN = { systems: false, modeling: true };
+
+test("license rules: a child's own m365 with none set uses the parent's, keeping its other config", () => {
+  const child = { ...emptyChild(), systems: [m365With(), { systemKey: "zoom" }] as unknown[] };
+  const out = applyParentInheritance(child, parentWithRules, OWN);
+  assert.deepEqual(rulesOn(out), RULES);
+  const cfg = (out.systems[0] as { config: { onboard: { licenses: string[] }; offboard: unknown } }).config;
+  assert.deepEqual(cfg.onboard.licenses, ["Defender"]);
+  assert.deepEqual(cfg.offboard, { keep: true });
+  assert.equal((out.systems[1] as { systemKey: string }).systemKey, "zoom");
+  // The child's row itself is untouched.
+  assert.equal(rulesOn(child), undefined);
+});
+
+test("license rules: the child's own rules win, and an empty list is a deliberate none", () => {
+  const own = [{ when: "", licenses: ["Business Premium"] }];
+  assert.deepEqual(rulesOn(applyParentInheritance({ ...emptyChild(), systems: [m365With(own)] as unknown[] }, parentWithRules, OWN)), own);
+  assert.deepEqual(rulesOn(applyParentInheritance({ ...emptyChild(), systems: [m365With([])] as unknown[] }, parentWithRules, OWN)), []);
+});
+
+test("license rules: not inherited when the child doesn't follow the parent's rules", () => {
+  const child = { ...emptyChild(), systems: [m365With()] as unknown[] };
+  assert.equal(rulesOn(applyParentInheritance(child, parentWithRules, { systems: false, modeling: false })), undefined);
+});
+
+test("license rules: nothing to inherit when the parent has no m365 rules, or the child has no m365", () => {
+  const child = { ...emptyChild(), systems: [m365With()] as unknown[] };
+  assert.equal(rulesOn(applyParentInheritance(child, { ...parent, systems: [m365With()] }, OWN)), undefined);
+  const noM365 = { ...emptyChild(), systems: [{ systemKey: "zoom" }] as unknown[] };
+  assert.deepEqual(applyParentInheritance(noM365, parentWithRules, OWN).systems, noM365.systems);
+});
+
+test("license rules: a child planning with the parent's systems has them already", () => {
+  assert.deepEqual(rulesOn(applyParentInheritance(emptyChild(), parentWithRules, BOTH)), RULES);
+});
+
+test("license rules: an inherited rule picks the child's license at plan time", async () => {
+  const { planCase } = await import("../orchestrator");
+  const { resolvePlannedConfigs } = await import("../profiles/plan-resolve");
+  const row = (config: unknown) => ({ id: "s", clientId: "c", systemKey: "m365", mode: "api", onboardWhen: "always", offboardWhen: "never",
+    dependsOn: [], requiresApproval: false, captureEvidence: false, secretNames: [], config });
+  const child = applyParentInheritance({ ...emptyChild(), systems: [row({ onboard: { licenses: [] } })] as unknown[] },
+    { ...parent, globals: null, personas: null, systems: [row({ onboard: { licenses: [], licenseRules: RULES } })] as unknown[] }, OWN);
+  for (const [needsComputer, want] of [[true, ["E5"]], [false, ["E1"]]] as const) {
+    const payload = { firstName: "Jane", lastName: "Doe", needsComputer };
+    const jobs = resolvePlannedConfigs(child as never, payload, "onboard", planCase(child.systems as never, "onboard", payload));
+    assert.deepEqual((jobs.find((j) => j.systemKey === "m365")!.config as { licenses: string[] }).licenses, [...want]);
+  }
+});

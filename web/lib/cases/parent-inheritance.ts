@@ -55,8 +55,42 @@ export function applyParentInheritance<C extends InheritableChild>(
       adObjects: out.adObjects ?? parent.adObjects,
       cloudGroups: out.cloudGroups ?? parent.cloudGroups,
     };
+    // M365 license rules live on the m365 SYSTEM, not the client, so the fallback above never saw
+    // them: a child with its own m365 row planned with no rules at all, even while it followed the
+    // parent's people rules. They fall back the same way (unset -> the parent's; an empty list is a
+    // deliberate "none"). A child planning with the parent's systems already has them.
+    if (!opts.systems) out = { ...out, systems: withParentLicenseRules(out.systems, parent.systems) };
   }
   return out;
+}
+
+// config.onboard.licenseRules on a system row, or undefined when that system has never set any.
+export function licenseRulesOf(system: unknown): unknown[] | undefined {
+  const cfg = ((system as { config?: unknown } | null)?.config ?? null) as { onboard?: { licenseRules?: unknown } } | null;
+  const rules = cfg?.onboard?.licenseRules;
+  return Array.isArray(rules) ? rules : undefined;
+}
+
+const m365Of = (systems: unknown[]) => systems.find((s) => (s as { systemKey?: unknown } | null)?.systemKey === "m365");
+
+// The parent's license rules a child's m365 system inherits, or null when it doesn't: it set its own
+// (even an empty list), or the parent has no m365 system or no rules. The client page shows these.
+export function inheritedLicenseRules(childM365: unknown, parentSystems: unknown[]): unknown[] | null {
+  if (licenseRulesOf(childM365) !== undefined) return null;
+  const rules = licenseRulesOf(m365Of(parentSystems));
+  return rules && rules.length > 0 ? rules : null;
+}
+
+function withParentLicenseRules(systems: unknown[], parentSystems: unknown[]): unknown[] {
+  const child = m365Of(systems);
+  const rules = child ? inheritedLicenseRules(child, parentSystems) : null;
+  if (!child || !rules) return systems;
+  return systems.map((s) => {
+    if (s !== child) return s;
+    const cfg = ((s as { config?: unknown }).config ?? {}) as Record<string, unknown>;
+    const onboard = (cfg.onboard ?? {}) as Record<string, unknown>;
+    return { ...(s as object), config: { ...cfg, onboard: { ...onboard, licenseRules: rules } } };
+  });
 }
 
 // The parent columns both planning paths need to read.
