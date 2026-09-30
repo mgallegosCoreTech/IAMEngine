@@ -12,6 +12,7 @@ import { CONCURRENCY_KEY, resolveCaps, admitUnderCaps, governorActive, groupKey,
 export const SETUP_GATE_KEY = "setup_gate";
 import { isConvertConfirmed, isConvertStillComing } from "./mailbox-convert";
 import { jobResultEnvelope } from "./job-result";
+import { teamsPhoneNumberOf } from "../teams/phone";
 
 import { cloudObjectFor, type CloudObject } from "./cloud-object";
 import { PASSWORD_RESET_SYSTEM_KEYS } from "./password-reset";
@@ -1156,6 +1157,22 @@ export function makeRunnerService(db: PrismaClient) {
       const runningCaseIds = [...new Set(claimed.map((c) => c.caseRequestId))];
       await db.caseRequest.updateMany({ where: { id: { in: runningCaseIds }, status: { in: ["queued", "planning"] } }, data: { status: "running" } });
 
+      // AD phone write-back: the number the teams step assigned (its result's PhoneNumber), injected as
+      // `writebackPhone` so the on-prem agent writes AD telephoneNumber without any cloud credential.
+      // No succeeded teams result, or no number on it, and the step writes nothing.
+      const phoneWritebackCaseIds = [...new Set(claimed.filter((j) => j.systemKey === "ad-phone-writeback").map((j) => j.caseRequestId))];
+      const phoneByCase = new Map<string, string>();
+      if (phoneWritebackCaseIds.length > 0) {
+        const teamsJobs = await db.job.findMany({
+          where: { caseRequestId: { in: phoneWritebackCaseIds }, systemKey: "teams", status: "succeeded" },
+          select: { caseRequestId: true, result: true },
+        });
+        for (const t of teamsJobs) {
+          const n = teamsPhoneNumberOf(t.result);
+          if (n) phoneByCase.set(t.caseRequestId, n);
+        }
+      }
+
       // AD email write-back (B1): for any ad-email-writeback job being handed out, resolve the
       // mailbox's ASSIGNED primary SMTP from the sibling cloud job's result (exchange preferred, then
       // m365) and inject it into the payload as `writebackEmail`, so the on-prem agent just writes AD
@@ -1360,6 +1377,8 @@ export function makeRunnerService(db: PrismaClient) {
         const basePayload =
           j.systemKey === "ad-email-writeback"
             ? { ...casePayload, writebackEmail: emailByCase.get(j.caseRequestId) ?? null }
+            : j.systemKey === "ad-phone-writeback"
+            ? { ...casePayload, writebackPhone: phoneByCase.get(j.caseRequestId) ?? null }
             : j.systemKey === "ad-consistency-check"
             ? { ...casePayload, cloudObject: cloudByCase.get(j.caseRequestId) ?? cloudObjectFor(null) }
             : capturedManager

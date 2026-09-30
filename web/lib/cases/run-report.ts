@@ -476,6 +476,8 @@ export function buildRunReport(input: BuildRunReportInput): RunReport {
         ["displayName", "Display name"], ["userPrincipalName", "UPN / username"], ["jobTitle", "Job title"],
         ["department", "Department"], ["managerName", "Manager"], ["officeLocation", "Office location"],
         ["usageLocation", "Usage location (M365)"], ["timezone", "Timezone"], ["startDate", "Start date"],
+        // Teams Phone: blank = the next free number for the office's area code (lib/teams/phone.ts).
+        ...(input.jobs.some((j) => j.systemKey === "teams") ? [["teamsPhoneNumber", "Teams phone number (blank = next free for the office)"] as [string, string]] : []),
       ];
       const srcMap = (p.fieldSource && typeof p.fieldSource === "object" ? p.fieldSource : {}) as Record<string, unknown>;
       const fields = defs.map(([key, label]) => ({

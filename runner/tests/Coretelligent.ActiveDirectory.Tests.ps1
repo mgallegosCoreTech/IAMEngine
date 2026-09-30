@@ -11,7 +11,7 @@ BeforeAll {
     # All stubs accept $Server/$Credential — the module splats @AdConnection (brokered ad-dc auth) onto every cmdlet.
     function global:Get-ADUser { [CmdletBinding()] param($Filter, $Identity, $Properties, $Server, $Credential) }
     function global:New-ADUser { [CmdletBinding()] param($Name, $SamAccountName, $UserPrincipalName, $GivenName, $Surname, $DisplayName, $Path, $Enabled, $OtherAttributes, $AccountPassword, $Server, $Credential) }
-    function global:Set-ADUser { [CmdletBinding()] param($Identity, $HomeDrive, $HomeDirectory, $Replace, $Clear, $Add, $Remove, $Manager, $EmailAddress, $ChangePasswordAtLogon, $Server, $Credential) }
+    function global:Set-ADUser { [CmdletBinding()] param($Identity, $HomeDrive, $HomeDirectory, $Replace, $Clear, $Add, $Remove, $Manager, $EmailAddress, $OfficePhone, $ChangePasswordAtLogon, $Server, $Credential) }
     function global:Add-ADGroupMember { [CmdletBinding()] param($Identity, $Members, $Server, $Credential) }
     function global:Remove-ADGroupMember { [CmdletBinding(SupportsShouldProcess)] param($Identity, $Members, $Server, $Credential) }
     function global:Get-ADPrincipalGroupMembership { [CmdletBinding()] param($Identity, $Server, $Credential) }
@@ -627,6 +627,53 @@ Describe 'Invoke-CtgADEmailWriteback' {
         $r = Invoke-CtgADEmailWriteback -User $user -Config ([pscustomobject]@{})
         $r.Status | Should -Be 'ok'
         Should -Invoke Set-ADUser -ModuleName Coretelligent.ActiveDirectory -Times 0 -Exactly
+    }
+}
+
+# The teams step's assigned number, written to AD telephoneNumber (injected as writebackPhone).
+Describe 'Invoke-CtgADPhoneWriteback' {
+    BeforeEach {
+        Mock Get-ADUser -ModuleName Coretelligent.ActiveDirectory -MockWith { [pscustomobject]@{ SamAccountName = 'jdoe'; telephoneNumber = $null } }
+        Mock Set-ADUser -ModuleName Coretelligent.ActiveDirectory -MockWith { }
+    }
+
+    It 'writes the Teams number into telephoneNumber' {
+        $r = Invoke-CtgADPhoneWriteback -User ([pscustomobject]@{ SamAccountName = 'jdoe'; writebackPhone = '+12035550120' }) -Config ([pscustomobject]@{})
+        $r.TelephoneNumber | Should -Be '+12035550120'
+        Should -Invoke Set-ADUser -ModuleName Coretelligent.ActiveDirectory -Times 1 -Exactly -ParameterFilter { $Identity -eq 'jdoe' -and $OfficePhone -eq '+12035550120' }
+        ($r.Actions -join ' ') | Should -Match "set AD telephoneNumber: '\(unset\)' -> '\+12035550120'"
+    }
+
+    It 'is idempotent' {
+        Mock Get-ADUser -ModuleName Coretelligent.ActiveDirectory -MockWith { [pscustomobject]@{ SamAccountName = 'jdoe'; telephoneNumber = '+12035550120' } }
+        $r = Invoke-CtgADPhoneWriteback -User ([pscustomobject]@{ SamAccountName = 'jdoe'; writebackPhone = '+12035550120' }) -Config ([pscustomobject]@{})
+        ($r.Actions -join ' ') | Should -Match 'already'
+        Should -Invoke Set-ADUser -ModuleName Coretelligent.ActiveDirectory -Times 0 -Exactly
+    }
+
+    It 'does nothing when the Teams step assigned no number' {
+        $r = Invoke-CtgADPhoneWriteback -User ([pscustomobject]@{ SamAccountName = 'jdoe'; writebackPhone = $null }) -Config ([pscustomobject]@{})
+        ($r.Actions -join ' ') | Should -Match 'no Teams number'
+        Should -Invoke Set-ADUser -ModuleName Coretelligent.ActiveDirectory -Times 0 -Exactly
+    }
+
+    It 'warns (and writes nothing) when the user is not in AD' {
+        Mock Get-ADUser -ModuleName Coretelligent.ActiveDirectory -MockWith { $null }
+        $r = Invoke-CtgADPhoneWriteback -User ([pscustomobject]@{ SamAccountName = 'ghost'; writebackPhone = '+12035550120' }) -Config ([pscustomobject]@{})
+        ($r.Actions -join ' ') | Should -Match "WARN the user wasn't found in AD"
+        Should -Invoke Set-ADUser -ModuleName Coretelligent.ActiveDirectory -Times 0 -Exactly
+    }
+
+    It 'under WhatIf, writes nothing' {
+        $r = Invoke-CtgADPhoneWriteback -User ([pscustomobject]@{ SamAccountName = 'jdoe'; writebackPhone = '+12035550120' }) -Config ([pscustomobject]@{}) -WhatIf
+        Should -Invoke Set-ADUser -ModuleName Coretelligent.ActiveDirectory -Times 0 -Exactly
+    }
+
+    It 'validates telephoneNumber against the injected number' {
+        Mock Get-ADUser -ModuleName Coretelligent.ActiveDirectory -MockWith { [pscustomobject]@{ SamAccountName = 'jdoe'; telephoneNumber = '+12035550120' } }
+        (Confirm-CtgADPhoneWriteback -User ([pscustomobject]@{ SamAccountName = 'jdoe'; writebackPhone = '+12035550120' }) -Config ([pscustomobject]@{})).ok | Should -BeTrue
+        (Confirm-CtgADPhoneWriteback -User ([pscustomobject]@{ SamAccountName = 'jdoe'; writebackPhone = '+12035550999' }) -Config ([pscustomobject]@{})).ok | Should -BeFalse
+        (Confirm-CtgADPhoneWriteback -User ([pscustomobject]@{ SamAccountName = 'jdoe' }) -Config ([pscustomobject]@{})).ok | Should -BeTrue
     }
 }
 

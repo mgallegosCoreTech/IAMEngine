@@ -10,7 +10,7 @@ BeforeAll {
     # Param blocks so Pester -ParameterFilter can see the bound args. All stubs accept
     # $Server/$Credential — the module splats @AdConnection (brokered ad-dc auth) onto every cmdlet.
     function global:Get-ADUser { [CmdletBinding()] param($Filter, $Identity, $Properties, $Server, $Credential) }
-    function global:Set-ADUser { [CmdletBinding()] param($Identity, $HomeDrive, $HomeDirectory, $Replace, $Clear, $Add, $Remove, $Manager, $EmailAddress, $ChangePasswordAtLogon, $Server, $Credential) }
+    function global:Set-ADUser { [CmdletBinding()] param($Identity, $HomeDrive, $HomeDirectory, $Replace, $Clear, $Add, $Remove, $Manager, $EmailAddress, $OfficePhone, $ChangePasswordAtLogon, $Server, $Credential) }
     function global:Add-ADGroupMember { [CmdletBinding()] param($Identity, $Members, $Server, $Credential) }
     function global:Remove-ADGroupMember { [CmdletBinding(SupportsShouldProcess)] param($Identity, $Members, $Server, $Credential) }
     function global:Get-ADPrincipalGroupMembership { [CmdletBinding()] param($Identity, $Server, $Credential) }

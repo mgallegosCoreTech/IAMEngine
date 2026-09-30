@@ -10,7 +10,7 @@
     # The on-prem AD cmdlets (RSAT). Present on the client agent host, not the central runner.
     RequiredModules   = @('ActiveDirectory')
 
-    FunctionsToExport = @('Invoke-CtgADOnboarding', 'Invoke-CtgADOffboarding', 'Invoke-CtgADChange', 'Invoke-CtgADEmailWriteback', 'Confirm-CtgADEmailWriteback', 'Invoke-CtgADConsistencyCheck', 'Invoke-CtgADHardMatch', 'Invoke-CtgADPasswordReset', 'Set-CtgADAttributes', 'Get-CtgMirrorGroups', 'Test-CtgCondition', 'Resolve-CtgOuPath', 'Confirm-CtgAD', 'Test-CtgAdCreateUserAce', 'Get-CtgAdAccountSids', 'Test-CtgAdOuCreateUserRight')
+    FunctionsToExport = @('Invoke-CtgADOnboarding', 'Invoke-CtgADOffboarding', 'Invoke-CtgADChange', 'Invoke-CtgADEmailWriteback', 'Confirm-CtgADEmailWriteback', 'Invoke-CtgADPhoneWriteback', 'Confirm-CtgADPhoneWriteback', 'Invoke-CtgADConsistencyCheck', 'Invoke-CtgADHardMatch', 'Invoke-CtgADPasswordReset', 'Set-CtgADAttributes', 'Get-CtgMirrorGroups', 'Test-CtgCondition', 'Resolve-CtgOuPath', 'Confirm-CtgAD', 'Test-CtgAdCreateUserAce', 'Get-CtgAdAccountSids', 'Test-CtgAdOuCreateUserRight')
     CmdletsToExport   = @()
     VariablesToExport = @()
     AliasesToExport   = @()

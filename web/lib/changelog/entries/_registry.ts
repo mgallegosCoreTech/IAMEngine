@@ -357,3 +357,4 @@ export { entry as passwordResetLetsEntraAnswer } from "./password-reset-lets-ent
 export { entry as runnerAnchorsWorkingDirectory } from "./runner-anchors-working-directory";
 export { entry as syncWaitActuallyWaits } from "./sync-wait-actually-waits";
 export { entry as onedriveScaGrantActuallyRuns } from "./onedrive-sca-grant-actually-runs";
+export { entry as teamsPhone } from "./teams-phone";

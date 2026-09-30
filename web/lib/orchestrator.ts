@@ -62,6 +62,9 @@ const IDENTITY_PIPELINE_OFFBOARD = ["active-directory", "directory-sync", "excha
 
 // The steps that take an M365 licence off. They must never run before `exchange` on an offboard.
 const OFFBOARD_LICENCE_SYSTEMS = ["entra", "m365"];
+// The offboard steps that need the licence still on: exchange (convert the mailbox to shared) and teams
+// (release the phone number).
+const BEFORE_LICENCE_SYSTEMS = ["exchange", "teams"];
 
 // For an on-prem-origin client, the corrected dependencies for the pipeline systems: each keeps its
 // NON-pipeline deps (e.g. servicenow) but its pipeline-to-pipeline edges (forward OR reversed) are
@@ -191,6 +194,27 @@ export function planCase(
       config: null,
     } as ClientSystem);
   }
+  // Synthetic ONBOARD step: write the Teams Phone number the teams step assigns into AD's
+  // telephoneNumber, so it syncs up to Entra and the address book. Same shape as ad-email-writeback:
+  // hybrid only (a standalone AD account isn't the cloud identity), runs on the client agent, and the
+  // number is injected at dispatch (runner-service claim) from the teams result, since it isn't known
+  // until teams runs.
+  if (action === "onboard" && !isAdStandalone && activeKeys.has("active-directory") && activeKeys.has("teams") && !activeKeys.has("ad-phone-writeback")) {
+    const base = active.find((s) => s.systemKey === "active-directory")!;
+    active.push({
+      ...base,
+      id: `${base.clientId}:ad-phone-writeback`,
+      systemKey: "ad-phone-writeback",
+      mode: "api",
+      onboardWhen: "always",
+      offboardWhen: "never",
+      dependsOn: ["teams"],
+      requiresApproval: false,
+      captureEvidence: false,
+      secretNames: ["ad-dc"],
+      config: null,
+    } as ClientSystem);
+  }
   const byKey = new Map(active.map((s) => [s.systemKey, s]));
   // Closing steps must run AFTER everything else, whatever the declared deps say — under DAG
   // gating an under-declared dependsOn would otherwise let case-resolution dispatch first.
@@ -212,11 +236,14 @@ export function planCase(
   // first), and the ~200 seeded clients carry that ordering in the database where a profile edit can't
   // reach them. So make it structural: on an offboard, entra/m365 wait for exchange, and exchange
   // drops any declared edge onto them — which is also what keeps the two rules from forming a cycle.
-  const convertBeforeLicence = action === "offboard" && byKey.has("exchange");
+  //
+  // The same holds for the Teams Phone number: release it while the account still has its Teams Phone
+  // licence (and the step can still read which number it was), not after the licence step took it.
+  const beforeLicence = action === "offboard" ? BEFORE_LICENCE_SYSTEMS.filter((k) => byKey.has(k)) : [];
   const offboardOrdered = (key: string, declared: string[]): string[] => {
-    if (!convertBeforeLicence) return declared;
-    if (OFFBOARD_LICENCE_SYSTEMS.includes(key)) return [...new Set([...declared, "exchange"])];
-    if (key === "exchange") return declared.filter((d) => !OFFBOARD_LICENCE_SYSTEMS.includes(d));
+    if (beforeLicence.length === 0) return declared;
+    if (OFFBOARD_LICENCE_SYSTEMS.includes(key)) return [...new Set([...declared, ...beforeLicence])];
+    if (beforeLicence.includes(key)) return declared.filter((d) => !OFFBOARD_LICENCE_SYSTEMS.includes(d));
     return declared;
   };
   const depsOf = (s: ClientSystem): string[] => {
@@ -289,6 +316,11 @@ export function planCase(
       // lib/secrets/auxiliary.ts, which attaches optional secrets only where they're actually wired.
       secretNames: s.systemKey === "sentinelone" && !jobSecretNames.includes("m365-admin")
         ? [...jobSecretNames, "m365-admin"]
+        : s.systemKey === "teams" && mode === "api"
+        // Teams Phone signs in with the client's m365-admin app (Coretelligent.Teams). Profiles modeled
+        // before the module existed name a "teams-admin" portal login that is usually a REPLACE_ME
+        // placeholder — as a required secret it would make the step unclaimable, so it's swapped.
+        ? [...new Set([...jobSecretNames.filter((n) => n !== "teams-admin"), "m365-admin"])]
         : jobSecretNames,
       // The runner needs only this action's resolved config, not the whole blob. planCase is only
       // ever invoked for onboard/offboard (change has its own planner) — cfg only has those two keys.

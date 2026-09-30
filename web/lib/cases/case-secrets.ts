@@ -26,7 +26,7 @@ export function serverHintFromLabel(label?: string | null): string | null {
 // exchange is the only AMBIGUOUS one: on-prem Exchange (hybrid) vs Exchange Online (cloud). It's
 // on-prem ONLY for a client that actually has an on-prem AD/sync system. A no-AD client is NOT
 // hybrid — even if a backbone was mislabeled "ad-synced" — so its exchange runs centrally.
-export const ALWAYS_ON_PREM_SYSTEMS = ["active-directory", "directory-sync", "ad-email-writeback", "ad-consistency-check", "ad-hard-match", "ad-password-reset"];
+export const ALWAYS_ON_PREM_SYSTEMS = ["active-directory", "directory-sync", "ad-email-writeback", "ad-phone-writeback", "ad-consistency-check", "ad-hard-match", "ad-password-reset"];
 
 export function systemIsOnPrem(systemKey: string, clientHasOnPremAd: boolean): boolean {
   if (ALWAYS_ON_PREM_SYSTEMS.includes(systemKey)) return true;

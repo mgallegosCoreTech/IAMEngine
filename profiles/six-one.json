@@ -103,14 +103,15 @@
       }
     },
     {
-      "key": "teams", "mode": "api", "secrets": ["teams-admin"], "dependsOn": ["m365"],
+      "key": "teams", "mode": "api", "secrets": ["m365-admin"], "dependsOn": ["m365"],
       "onboard": {
         "when": "on-request",
         "config": {
           "phoneByAreaCode": { "Stamford": "203", "Houston": "346", "Singapore": "+65" },
           "writeBack": ["ServiceNow contact business phone", "AD telephoneNumber", "case notes"]
         }
-      }
+      },
+      "offboard": { "when": "always" }
     },
     {
       "key": "avd", "mode": "api", "secrets": ["m365-admin"], "dependsOn": ["m365"],

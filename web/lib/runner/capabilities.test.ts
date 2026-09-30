@@ -49,7 +49,7 @@ test("onPremExclusions: legacy withholds nothing; a report withholds every unlis
   assert.deepEqual(onPremExclusions([]).sort(), [...ALWAYS_ON_PREM_SYSTEMS].sort()); // capable of none -> withhold all
   // The reported bug's shape: an agent that can do directory-sync but NOT active-directory. It also
   // can't do the AD email write-back (that rides the ActiveDirectory module).
-  assert.deepEqual(onPremExclusions(["directory-sync"]), ["active-directory", "ad-email-writeback", "ad-consistency-check", "ad-hard-match", "ad-password-reset"]);
+  assert.deepEqual(onPremExclusions(["directory-sync"]), ["active-directory", "ad-email-writeback", "ad-phone-writeback", "ad-consistency-check", "ad-hard-match", "ad-password-reset"]);
 });
 
 test("ad-email-writeback rides the active-directory capability (no separate cap to report)", () => {
@@ -57,6 +57,8 @@ test("ad-email-writeback rides the active-directory capability (no separate cap 
   assert.equal(agentCanRun("ad-email-writeback", ["active-directory"]), true);
   assert.equal(agentCanRun("ad-email-writeback", ["directory-sync"]), false); // can sync but not write AD
   assert.equal(agentCanRun("ad-email-writeback", null), true); // legacy — don't strand
+  assert.equal(agentCanRun("ad-phone-writeback", ["active-directory"]), true); // the Teams number, written by the AD agent
+  assert.equal(agentCanRun("ad-phone-writeback", ["directory-sync"]), false);
   // An AD-capable agent has the write-back NOT withheld.
   assert.equal(onPremExclusions(["active-directory"]).includes("ad-email-writeback"), false);
 });

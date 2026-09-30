@@ -203,6 +203,9 @@ Import-Module "$PSScriptRoot/modules/Coretelligent.XMatters/Coretelligent.XMatte
 Import-Module "$PSScriptRoot/modules/Coretelligent.LogicMonitor/Coretelligent.LogicMonitor.psd1" -Force
 Import-Module "$PSScriptRoot/modules/Coretelligent.Notify/Coretelligent.Notify.psd1" -Force
 Import-Module "$PSScriptRoot/modules/Coretelligent.Proofpoint/Coretelligent.Proofpoint.psd1" -Force
+# Teams Phone. Harmless to import: MicrosoftTeams itself only ever loads in the child process the step
+# starts (Invoke-CtgTeamsOutOfProcess), never here.
+Import-Module "$PSScriptRoot/modules/Coretelligent.Teams/Coretelligent.Teams.psd1" -Force
 # Low-code connectors: ONE generic executor for every custom-* system — it interprets the declarative
 # definition the app injects into the job as config.connector (docs/CONNECTOR_BUILDER.md).
 Import-Module "$PSScriptRoot/modules/Coretelligent.Connector/Coretelligent.Connector.psd1" -Force
@@ -1052,6 +1055,19 @@ function Get-CtgTenantDomain {
     $t
 }
 
+# What the Teams child process signs in with: the m365-admin app (id, tenant, certificate). The app's
+# service principal needs the Entra "Teams Administrator" role (see /help/teams).
+function Get-CtgTeamsAuth {
+    param($Job, $Creds)
+    $s = $Creds['m365-admin']
+    if (-not $s) { throw "the job did not broker the m365-admin secret — Teams Phone signs in with the client's m365-admin app" }
+    $cert = Get-CtgExoCertArgs $s
+    if ($cert.Count -eq 0) { throw "the m365-admin secret has no certificate — Teams app-only sign-in needs CertificateBase64 (a .pfx) or CertificateThumbprint (see /help/teams)" }
+    $tenant = Get-CtgTenantDomain $Job $Creds
+    Set-CtgPhase $Job.id "Teams Phone (separate process; tenant $tenant, app $($s.Credential.UserName))"
+    @{ AppId = [string]$s.Credential.UserName; Tenant = [string]$tenant; CertArgs = $cert }
+}
+
 # The app id this job's Graph/EXO work must run as — the m365-admin secret's Username.
 function Get-CtgM365AppId {
     param($Creds)
@@ -1418,6 +1434,12 @@ $DISPATCH = @{
         Onboard  = { param($job, $creds) Invoke-CtgADEmailWriteback -User (Add-ClientContext $job) -Config $job.config -AdConnection (New-CtgAdConnection $creds) }
         Validate = { param($job, $creds) Confirm-CtgADEmailWriteback -User (Add-ClientContext $job) -Config $job.config -AdConnection (New-CtgAdConnection $creds) }
     }
+    # Write the Teams number back into AD's telephoneNumber (onboard only). Runs on the client agent via
+    # the ActiveDirectory module; the app injects `writebackPhone` (the teams step's PhoneNumber) at dispatch.
+    'ad-phone-writeback' = @{
+        Onboard  = { param($job, $creds) Invoke-CtgADPhoneWriteback -User (Add-ClientContext $job) -Config $job.config -AdConnection (New-CtgAdConnection $creds) }
+        Validate = { param($job, $creds) Confirm-CtgADPhoneWriteback -User (Add-ClientContext $job) -Config $job.config -AdConnection (New-CtgAdConnection $creds) }
+    }
     # Hybrid identity-link check (onboard only, DETECT-ONLY): does the on-prem object's source anchor
     # match the Entra immutableId, or would it duplicate? The app injects the Entra object's anchor data.
     'ad-consistency-check' = @{
@@ -1531,6 +1553,15 @@ $DISPATCH = @{
         }
         Validate = { param($job, $creds) Confirm-CtgExchange -User $job.payload -Config $job.config -Action $job.action }
         Change   = { param($job, $creds) Invoke-CtgExchangeChange -User $job.payload -Config $job.config }
+    }
+    # Teams Phone: assign a Calling Plan number on onboard, release it on offboard. MicrosoftTeams
+    # ships the same identity assemblies Graph and EXO already loaded here, so ALL of it runs in a child
+    # pwsh (Invoke-CtgTeamsOutOfProcess) signed in with the m365-admin app certificate — no Connect key,
+    # and nothing Teams ever loads into this process. A dry run reaches the child as WhatIf.
+    'teams' = @{
+        Onboard  = { param($job, $creds) $a = Get-CtgTeamsAuth $job $creds; Invoke-CtgTeamsOutOfProcess -Action onboard  -User $job.payload -Config $job.config @a }
+        Offboard = { param($job, $creds) $a = Get-CtgTeamsAuth $job $creds; Invoke-CtgTeamsOutOfProcess -Action offboard -User $job.payload -Config $job.config @a }
+        Validate = { param($job, $creds) $a = Get-CtgTeamsAuth $job $creds; Invoke-CtgTeamsOutOfProcess -Action validate -ValidateAction $job.action -User $job.payload -Config $job.config @a }
     }
     'zoom' = @{
         Connect  = { param($job, $creds) Use-CtgZoomSecret -Job $job -Creds $creds }
@@ -2316,6 +2347,9 @@ $script:CtgAssemblySharingGroups = @{
     # process (Invoke-CtgPnPGrantOutOfProcess) so nothing loads it here at all; this entry is the
     # backstop for any OTHER path — a self-heal install, a future caller — that tries to.
     'PnP.PowerShell'           = 'entra-auth-stack'
+    # MicrosoftTeams bundles Microsoft.Identity.Client too. Teams Phone runs it in a child process
+    # (Invoke-CtgTeamsOutOfProcess); this is the backstop for anything else that tries to load it here.
+    'MicrosoftTeams'           = 'entra-auth-stack'
 }
 
 function Test-CtgModuleConflictsWithLoaded {

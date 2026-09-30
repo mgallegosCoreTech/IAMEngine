@@ -13,6 +13,7 @@ import { previewPerimeter81 } from "./perimeter81-preview";
 import { previewSpanning } from "./spanning-preview";
 import { previewEgnyte } from "./egnyte-preview";
 import { previewGoogleWorkspace } from "./google-workspace-preview";
+import { previewTeams } from "./teams-preview";
 
 export type Action = "onboard" | "offboard";
 // `user` (optional) is the planned case payload; when present the preview substitutes its
@@ -40,6 +41,7 @@ const PREVIEWERS: Record<string, Previewer> = {
   spanning: previewSpanning,
   egnyte: previewEgnyte,
   "google-workspace": previewGoogleWorkspace,
+  teams: previewTeams,
 };
 
 export function automationPreview(
@@ -115,6 +117,10 @@ const VALIDATES: Record<string, Record<Action, string[]>> = {
   egnyte: {
     onboard: ["Egnyte user present + active", "license tier matches config (e.g. power)"],
     offboard: ["Egnyte user deactivated (or deleted, per config)"],
+  },
+  teams: {
+    onboard: ["a Teams number assigned (the one entered on the case, when there is one)"],
+    offboard: ["no Teams number left assigned"],
   },
 };
 

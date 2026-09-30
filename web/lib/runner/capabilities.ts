@@ -38,7 +38,7 @@ export function parseCapabilities(v: unknown): string[] | null {
 // `mail` attribute), so an agent that can run "active-directory" can run it too — no separate capability
 // to report. Keeps a runner from having to advertise a new cap for the write-back step.
 function capabilityKey(systemKey: string): string {
-  return systemKey === "ad-email-writeback" || systemKey === "ad-consistency-check" || systemKey === "ad-hard-match" || systemKey === "ad-password-reset" ? "active-directory" : systemKey;
+  return systemKey === "ad-email-writeback" || systemKey === "ad-phone-writeback" || systemKey === "ad-consistency-check" || systemKey === "ad-hard-match" || systemKey === "ad-password-reset" ? "active-directory" : systemKey;
 }
 
 // Can this agent claim/run a job for `systemKey`? Non-on-prem systems are always runnable here (the

@@ -30,6 +30,7 @@ export const OPTIONAL_SECRETS: Record<string, string[]> = {
   "active-directory": ["ad-dc"],
   "directory-sync": ["ad-dc"],
   "ad-email-writeback": ["ad-dc"],
+  "ad-phone-writeback": ["ad-dc"],
   "ad-consistency-check": ["ad-dc"],
   "ad-hard-match": ["ad-dc"],
   "ad-password-reset": ["ad-dc"],

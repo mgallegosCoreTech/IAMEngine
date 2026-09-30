@@ -3,6 +3,7 @@
 // clients (no personas/globals) pass through unchanged. Onboard resolves the ONBOARD fragments
 // (add groups / place OU / set attrs); offboard resolves the OFFBOARD fragments with offboard
 // semantics (remove groups / move OU / set attrs).
+import { resolveTeamsOnboardConfig } from "../teams/phone";
 import { buildPlanContext } from "./context";
 import { resolveSystemConfig } from "./resolve";
 import { evaluateLicenseRules } from "../m365/license-rules";
@@ -571,10 +572,16 @@ export function resolvePlannedConfigs(
   // skips security/365 groups (those stay Graph's job).
   const m365Groups = deduped.find((j) => j.systemKey === "m365" || j.systemKey === "entra")?.config as { groups?: unknown } | null;
   const reqGroups = m365Groups && Array.isArray(m365Groups.groups) ? m365Groups.groups : null;
-  if (!reqGroups || reqGroups.length === 0) return appendPrinters(deduped);
-  return appendPrinters(deduped.map((j) =>
+  if (!reqGroups || reqGroups.length === 0) return withTeamsPhone(appendPrinters(deduped), payload);
+  return withTeamsPhone(appendPrinters(deduped.map((j) =>
     j.systemKey === "exchange"
       ? { ...j, config: { ...((j.config as Record<string, unknown> | null) ?? {}), namedGroups: reqGroups } }
       : j
-  ));
+  )), payload);
+}
+
+// Teams Phone: which number the teams step should assign — the office's area code, or the number an
+// operator entered on the case (lib/teams/phone.ts). Last, so no earlier rule rewrites it.
+function withTeamsPhone(jobs: PlannedJob[], payload: Record<string, unknown>): PlannedJob[] {
+  return jobs.map((j) => (j.systemKey === "teams" ? { ...j, config: resolveTeamsOnboardConfig(j.config, payload) } : j));
 }

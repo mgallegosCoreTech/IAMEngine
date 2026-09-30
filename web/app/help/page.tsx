@@ -21,6 +21,7 @@ const GUIDES: Record<string, { title: string; blurb: string; group: string }> = 
   google: { title: "Google Workspace", blurb: "Service account + domain-wide delegation scopes.", group: "Core identity" },
   "exchange-onprem": { title: "Exchange on-prem", blurb: "Hybrid mailbox steps against an on-prem Exchange.", group: "Core identity" },
   tap: { title: "Temporary Access Pass", blurb: "Entra TAP for a passwordless first sign-in.", group: "Core identity" },
+  teams: { title: "Teams Phone", blurb: "Assign and release Teams Calling Plan numbers with the m365-admin app.", group: "Core identity" },
 
   mimecast: { title: "Mimecast", blurb: "API 2.0 app + the permissions onboarding actually exercises.", group: "Email security" },
   proofpoint: { title: "Proofpoint Essentials", blurb: "Admin auth + the Entra/Azure sync the onboarding lane waits on.", group: "Email security" },

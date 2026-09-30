@@ -44,7 +44,8 @@ export const CATALOG: Record<string, CatalogEntry> = {
   // Offboard completion notice (Graph sendMail via m365-admin): communication email + SN case note.
   // Runs LAST — its per-client dependsOn lists the other offboard steps.
   notify:            { mode: "api", tier: 3, onboard: null, offboard: "on-request", secret: "m365-admin", dependsOn: ["m365"] },
-  teams:             { mode: "api", tier: 3, onboard: "on-request", offboard: null, secret: "teams-admin", dependsOn: ["m365"] },
+  // Teams Phone signs in with the m365-admin app (Coretelligent.Teams). Offboard releases the number.
+  teams:             { mode: "api", tier: 3, onboard: "on-request", offboard: "always", secret: "m365-admin", dependsOn: ["m365"] },
   avd:               { mode: "api", tier: 3, onboard: "on-request", offboard: "on-request", secret: "m365-admin", dependsOn: ["m365"] },
   "1password":       { mode: "api", tier: 3, onboard: "on-request", offboard: "on-request", secret: "1password" },
   notion:            { mode: "api", tier: 3, onboard: "on-request", offboard: null, secret: "notion" },

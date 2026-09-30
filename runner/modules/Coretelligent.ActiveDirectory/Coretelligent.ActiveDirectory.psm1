@@ -1082,6 +1082,57 @@ function Confirm-CtgADEmailWriteback {
     [pscustomobject]@{ ok = $pass; checks = @(@{ name = "AD mail = $email"; expected = $email; actual = $actual; pass = $pass }) }
 }
 
+# ── Teams number write-back ───────────────────────────────────────────────────────────────────────
+# Write the Teams Phone number the teams step assigned into AD's telephoneNumber, so it syncs to Entra
+# and shows in the address book. The app injects it as `writebackPhone` at dispatch (from the teams
+# step's PhoneNumber); no number = the teams step assigned none, and nothing is written.
+function Invoke-CtgADPhoneWriteback {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][pscustomobject]$User,
+        [Parameter(Mandatory)][pscustomobject]$Config,
+        [hashtable]$AdConnection = @{}
+    )
+    $phone = [string](Get-CtgProp $User 'writebackPhone')
+    if ([string]::IsNullOrWhiteSpace($phone)) {
+        return [pscustomobject]@{ System = 'ad-phone-writeback'; Status = 'ok'; Actions = @('no Teams number to write back (the Teams step assigned none) — nothing done') }
+    }
+    $phone = $phone.Trim()
+    $u = Get-CtgAdCaseUser -User $User -Properties @('telephoneNumber') -AdConnection $AdConnection
+    if (-not $u) {
+        return [pscustomobject]@{ System = 'ad-phone-writeback'; Status = 'ok'; Actions = @("WARN the user wasn't found in AD (or their display name matches more than one) — telephoneNumber not written; set it to $phone by hand") }
+    }
+    $sam = [string](Get-CtgProp $u 'SamAccountName')
+    $current = [string](Get-CtgProp $u 'telephoneNumber')
+    $actions = [System.Collections.Generic.List[string]]::new()
+    if ($current -eq $phone) { $actions.Add("AD telephoneNumber already '$phone' — no change") }
+    elseif ($PSCmdlet.ShouldProcess($sam, "Set AD telephoneNumber = $phone")) {
+        try {
+            Set-ADUser -Identity $sam -OfficePhone $phone -ErrorAction Stop @AdConnection
+            $actions.Add("set AD telephoneNumber: '$(if ($current) { $current } else { '(unset)' })' -> '$phone'")
+        }
+        catch { throw "setting AD telephoneNumber for '$sam' to '$phone': $($_.Exception.Message)" }
+    }
+    else { $actions.Add("would set AD telephoneNumber for $sam to '$phone' (WhatIf)") }
+    [pscustomobject]@{ System = 'ad-phone-writeback'; Status = 'ok'; Sam = $sam; TelephoneNumber = $phone; Actions = $actions.ToArray() }
+}
+
+function Confirm-CtgADPhoneWriteback {
+    param(
+        [Parameter(Mandatory)][pscustomobject]$User,
+        [Parameter(Mandatory)][pscustomobject]$Config,
+        [hashtable]$AdConnection = @{}
+    )
+    $phone = [string](Get-CtgProp $User 'writebackPhone')
+    if ([string]::IsNullOrWhiteSpace($phone)) {
+        return [pscustomobject]@{ ok = $true; checks = @(@{ name = 'no Teams number to write back — nothing to verify'; expected = $true; actual = $true; pass = $true }) }
+    }
+    $u = Get-CtgAdCaseUser -User $User -Properties @('telephoneNumber') -AdConnection $AdConnection
+    $actual = [string](Get-CtgProp $u 'telephoneNumber')
+    $pass = $actual -eq $phone.Trim()
+    [pscustomobject]@{ ok = $pass; checks = @(@{ name = "AD telephoneNumber = $($phone.Trim())"; expected = $phone.Trim(); actual = $actual; pass = $pass }) }
+}
+
 # ── Hybrid identity-link CHECK (Design D, DETECT-ONLY) ────────────────────────────────────────────
 # Verify that the on-prem AD object will LINK to its Entra object rather than spawn a duplicate: the
 # Entra source anchor (immutableId) must equal base64(objectGUID) OR base64(mS-DS-ConsistencyGuid).
@@ -1372,4 +1423,4 @@ function Test-CtgAdOuCreateUserRight {
     }
 }
 
-Export-ModuleMember -Function Invoke-CtgADOnboarding, Invoke-CtgADOffboarding, Invoke-CtgADChange, Invoke-CtgADEmailWriteback, Confirm-CtgADEmailWriteback, Invoke-CtgADConsistencyCheck, Invoke-CtgADHardMatch, Invoke-CtgADPasswordReset, Set-CtgADAttributes, Get-CtgMirrorGroups, Test-CtgCondition, Resolve-CtgOuPath, Confirm-CtgAD, Test-CtgAdCreateUserAce, Get-CtgAdAccountSids, Test-CtgAdOuCreateUserRight
+Export-ModuleMember -Function Invoke-CtgADOnboarding, Invoke-CtgADOffboarding, Invoke-CtgADChange, Invoke-CtgADEmailWriteback, Confirm-CtgADEmailWriteback, Invoke-CtgADPhoneWriteback, Confirm-CtgADPhoneWriteback, Invoke-CtgADConsistencyCheck, Invoke-CtgADHardMatch, Invoke-CtgADPasswordReset, Set-CtgADAttributes, Get-CtgMirrorGroups, Test-CtgCondition, Resolve-CtgOuPath, Confirm-CtgAD, Test-CtgAdCreateUserAce, Get-CtgAdAccountSids, Test-CtgAdOuCreateUserRight

@@ -90,6 +90,19 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     }
   }
 
+  // Teams Phone: a number typed on a case that has already started isn't re-planned above, but it must
+  // still reach the teams step — which, right after onboarding, is often waiting on its licence. Write
+  // it onto any teams job not being worked on right now. One that already assigned a number is harmless
+  // to update: the runner never replaces a number a user already has.
+  if (c.jobs.length > 0 && touched.includes("teamsPhoneNumber")) {
+    const teams = await db.job.findMany({ where: { caseRequestId: params.id, systemKey: "teams", status: { notIn: ["dispatched", "running"] } }, select: { id: true, request: true } });
+    for (const t of teams) {
+      const reqJson = { ...((t.request ?? {}) as Record<string, unknown>) };
+      reqJson.config = { ...((reqJson.config ?? {}) as Record<string, unknown>), phoneNumber: payload.teamsPhoneNumber || null };
+      await db.job.update({ where: { id: t.id }, data: { request: reqJson as Prisma.InputJsonValue } });
+    }
+  }
+
   // Release the "needs_info" hold once everything's provided.
   if (c.pausedReason === "needs_info" && remaining.length === 0) {
     await makeCaseRepository(db).setHold(params.id, null);
